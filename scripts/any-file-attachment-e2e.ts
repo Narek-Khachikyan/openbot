@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   assertSupportedAttachmentName,
   isOpenableAttachmentName,
@@ -153,6 +153,40 @@ async function run() {
     assert.equal(outbound.kind, "file");
     assert.equal(outbound.mimeType, "application/octet-stream");
 
+    const unicodeNames = [
+      { source: "ชุดคำถาม.docx", stored: "ชุดคำถาม.docx" },
+      { source: "हिन्दी नोट.txt", stored: "हिन्दी नोट.txt" },
+      { source: "cafe\u0301 menu.txt", stored: "cafe\u0301 menu.txt" },
+      { source: "report+draft!.txt", stored: "report-draft-.txt" },
+    ];
+    const unicodePaths: string[] = [];
+    for (const [index, { source }] of unicodeNames.entries()) {
+      const directory = join(root, "unicode", String(index));
+      await mkdir(directory, { recursive: true });
+      const path = join(directory, source);
+      await writeFile(path, profile);
+      unicodePaths.push(path);
+    }
+    const unicodeSources = await Promise.all(
+      unicodePaths.map(async (path) => ({ path, handle: await open(path, "r") })),
+    );
+    const unicodeGenerated = await Effect.runPromise(
+      files.stageGenerated({ sources: unicodeSources, ownerAgentId: "agent" }),
+    ).finally(() => Promise.all(unicodeSources.map((source) => source.handle.close())));
+    const unicodeDrafts = await Effect.runPromise(files.prepareDrafts(unicodePaths, []));
+    const unicodeReport = {
+      expected: unicodeNames.map(({ stored }) => stored),
+      agent: unicodeGenerated.map((attachment) => attachment.name),
+      agentStored: unicodeGenerated.map((attachment) => basename(attachment.path)),
+      user: unicodeDrafts.map((draft) => draft.name),
+    };
+    assert.deepEqual(
+      [unicodeReport.agent, unicodeReport.agentStored, unicodeReport.user],
+      [unicodeReport.expected, unicodeReport.expected, unicodeReport.expected],
+      `Unicode attachment names: ${JSON.stringify(unicodeReport)}`,
+    );
+    for (const attachment of unicodeGenerated) assert.deepEqual(await readFile(attachment.path), Buffer.from(profile));
+
     const oldHost = { eml: true, media: true, zip: true, mp4: true, svg: true, anyFile: false };
     assert.equal(isSupportedAttachmentNameFor("office.ovpn", oldHost), false);
     assert.equal(isSupportedAttachmentNameFor("kubeconfig", oldHost), false);
@@ -190,6 +224,7 @@ async function run() {
       })),
       voice: voice?.mimeType,
       outbound: { name: outbound.name, kind: outbound.kind, mimeType: outbound.mimeType },
+      unicodeNames: unicodeReport,
     };
   } finally {
     await rm(root, { recursive: true, force: true });

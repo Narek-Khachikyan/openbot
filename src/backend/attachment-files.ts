@@ -654,7 +654,7 @@ const inspectSourceEffect = Effect.fn("Attachments.inspectSource")(function* (
 
 function sanitizeName(path: string): string {
   const value = basename(path)
-    .replace(/[^\p{L}\p{N}._ -]+/gu, "-")
+    .replace(/[^\p{L}\p{M}\p{N}._ -]+/gu, "-")
     .replace(/^\.+/, "")
     .trim();
   if (!value) return "attachment";
